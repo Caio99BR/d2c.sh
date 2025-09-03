@@ -83,6 +83,11 @@ for config_file in $(ls ${config_file_dir}*.toml 2>/dev/null | sort -V); do
     gotify_endpoint=$(yq '.gotify.endpoint' ${config_file})
     gotify_token=$(yq '.gotify.token' ${config_file})
 
+    # read telegram config
+    telegram_enabled=$(yq '.telegram.enabled' ${config_file})
+    telegram_token=$(yq '.telegram.token' ${config_file})
+    telegram_chat_id=$(yq '.telegram.chat_id' ${config_file})
+
     # get records from Cloudflare
     existing_records_raw=$(curl --silent --request GET \
         --url ${cloudflare_base}/zones/${zone_id}/dns_records \
@@ -141,7 +146,17 @@ for config_file in $(ls ${config_file_dir}*.toml 2>/dev/null | sort -V); do
                         status_code=$(curl --silent --output /dev/null --write-out "%{http_code}" "${gotify_endpoint}/message?token=${gotify_token}" -F "title=[d2c.sh] ${name} has changed" -F "message=Public IP for ${name} has changed (${public_ip})" -F "priority=5")
 
                         if [[ "$status_code" -ne 200 ]]; then
-                            echo "[d2c.sh] Failed to sent Gotify notification"
+                            echo "[d2c.sh] Failed to send Gotify notification"
+                        fi
+                    fi
+
+                    # check if Telegram is enabled
+                    if [ "$telegram_enabled" = true ]; then
+                        # send changed ip notification
+                        status_code=$(curl --silent --output /dev/null --write-out "%{http_code}" https://api.telegram.org/bot"${telegram_token}"/sendMessage -d chat_id="${telegram_chat_id}" -d disable_web_page_preview=true -d text="[d2c.sh] Public IP for ${name} has changed (${public_ip})")
+
+                        if [[ "$status_code" -ne 200 ]]; then
+                            echo "[d2c.sh] Failed to send Telegram notification"
                         fi
                     fi
                 else
