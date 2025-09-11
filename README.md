@@ -144,6 +144,7 @@ $ crontab -e # set cronjob to run periodically
 
 d2c.sh by default does not use any notification service, but the following are supported and can be enabled:
 - [Gotify](https://gotify.net/)
+- [Telegram Bot API](https://core.telegram.org/api/bots)
 - ...
 
 When DNS records are updated, d2c.sh will send a notification to enabled services. Feel free to submit a pull request to add more notification services.
@@ -158,3 +159,20 @@ enabled = true
 endpoint = "http://gotify.example.com"
 token = "ccc"
 ```
+
+#### 2. Telegram
+
+To enable notifications via Telegram bot, add the following configuration to your `toml` file:
+
+```toml
+[telegram]
+enabled = true
+token = "aaabbb" # from BotFather
+chat_id = "111234"
+```
+
+You can get your chat ID by sending a message to the bot and going to this URL to view the chat_id:
+
+`https://api.telegram.org/botYOUR_BOT_TOKEN/getUpdates`
+
+
