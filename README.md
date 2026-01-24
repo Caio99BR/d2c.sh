@@ -1,23 +1,27 @@
 # d2c.sh
 
-Update Cloudflare DNS 'A' and 'AAAA' records for your dynamic IP.
+The lightweight IPv4/IPv6 dynamic DNS updater for Cloudflare.
 
 ---
 
-d2c.sh (Dynamic DNS Cloudflare) is a very simple bash script to automatically update the IP address of A and AAAA DNS records from Cloudflare.
+d2c.sh is a simple Bash script that automatically updates A and AAAA DNS records on Cloudflare for your machine’s public IP.
 
 ### Configure
 
-d2c.sh is configured using TOML files located in `/etc/d2c/`. The first time you run d2c.sh from the command-line, it will create the config directory for you. You will then need to manually create one or more TOML configuration files.
+> [!WARNING]
+> d2c.sh updates existing records. Make sure to create them in the Cloudflare dashboard before running d2c.sh.
 
-The script processes all files in `/etc/d2c/` directory that end with `.toml`, e.g. `/etc/d2c/d2c.toml`, `/etc/d2c/zone1.toml` or `/etc/d2c/zone2.toml`.
+By default, configuration files are read from `/etc/d2c/`. You can override the configuration directory using the `-c`/ `--config` option.
 
-Syntax:
+It processes all files in the configuration directory that end with `.toml`, e.g., `/etc/d2c/d2c.toml`, `/etc/d2c/zone1.toml` or `/etc/d2c/zone2.toml`.
+
+> [!WARNING]
+> Make sure to create the correct type of record (A or AAAA) according to IPv4 or IPv6, as d2c.sh will ignore misconfigured records.
 
 ```toml
 [api]
-zone-id = "aaa" # your DNS zone ID
-api-key = "bbb" # your API key with DNS records permissions
+zone-id = "aaa"           # your DNS zone ID
+api-key = "bbb"           # your API key with DNS records permissions
 
 [[dns]]
 name = "dns1.example.com" # DNS name
@@ -30,63 +34,32 @@ proxy = false
 [[dns]]
 name = "dns6.example.com"
 proxy = false
-ipv6 = true
+ipv6 = true               # set this entry as ipv6
 ```
-
-When d2c.sh is run, it will process each `*.toml` TOML file in the `/etc/d2c/` directory, updating the records configured in each with the current public IP of the machine. The A / AAAA records must be created from the Cloudflare dashboard first; then d2c.sh will be able to update them with the server's public IP. Make sure to create the correct type of record (A or AAAA) according to IPv4 or IPv6, as d2c.sh will ignore misconfigured records.
 
 ### Usage
 
-```sh
-$ d2c.sh --help
-
-d2c (Dynamic Dns Cloudflare): Update the Cloudflare DNS A and AAAA records for your dynamic IP.
-
-Usage: d2c.sh
-
-`d2c` UPDATES existing records. Please, create them in Cloudflare Dashboard before running this script.
-
-The configuration is done in `/etc/d2c/*.toml` files in TOML format.
-Configuration file structure:
-
-[api]
-zone-id = "<zone id>"
-api-key = "<api key>"
-
-[[dns]]
-name = "test.example.com"
-proxy = false
-
-[[dns]]
-name = "test2.example.com"
-proxy = true
-
-[[dns]]
-name = "test-ipv6.example.com"
-proxy = false
-ipv6 = true # Optional, for AAAA records
-
-```
-
 #### Method 1: Installing d2c.sh
 
-Install d2c.sh using the installation script:
+Clone the repository:
 
 ```sh
-$ ./install
-
-Successfully installed d2c.sh into /usr/local/bin.
-Please, run d2c.sh from command-line before scheduling any cronjob.
-Help: `d2c.sh --help` or `d2c.sh -h` or `d2c.sh help`.
+$ git clone https://github.com/ddries/d2c.sh.git
+$ cd d2c.sh
 ```
 
-Then, run d2c.sh from command-line for the first time:
+Install the script:
+
+```sh
+$ sudo chmod +x d2c.sh
+$ sudo cp d2c.sh /usr/local/bin
+```
+
+Now, you can run d2c.sh from the command-line. If the configuration directoy does not exist, the script will create it for you.
 
 ```sh
 $ d2c.sh
 
-Directory: /etc/d2c/ does not exist.
-Creating...
 Created /etc/d2c/. Please, fill the configuration files.
 ```
 
@@ -112,6 +85,8 @@ $ d2c.sh # manually
 [d2c.sh] OK dns2.example-2.com
 
 $ crontab -e # set cronjob to run d2c.sh periodically
+
+$ d2c.sh -c /path/to/files # use another config path
 ```
 
 #### Method 2: Executing from URL
@@ -140,6 +115,25 @@ bash <(curl -s https://raw.githubusercontent.com/ddries/d2c.sh/master/d2c.sh)
 $ crontab -e # set cronjob to run periodically
 ```
 
+#### Method 3: Docker
+
+You can use the provided Dockerfile to build a Docker image of d2c.sh:
+
+```sh
+$ git clone https://github.com/ddries/d2c.sh.git
+$ cd d2c.sh
+$ docker build . -t ddries/d2c.sh:latest
+```
+
+Then, you can run it using your own Docker workflow. For instance, using plain Docker:
+
+```sh
+$ docker run --rm --network host -v /etc/d2c/:/etc/d2c ddries/d2c.sh:latest
+```
+
+> [!WARNING]
+> Make sure to set the network driver to `host`, since the container must have the host's IPv4/6 address.
+
 ### Notification Support
 
 d2c.sh by default does not use any notification service, but the following are supported and can be enabled:
@@ -167,12 +161,8 @@ To enable notifications via Telegram bot, add the following configuration to you
 ```toml
 [telegram]
 enabled = true
-token = "aaabbb" # from BotFather
+token = "aaabbb"    # from BotFather
 chat_id = "111234"
 ```
 
-You can get your chat ID by sending a message to the bot and going to this URL to view the chat_id:
-
-`https://api.telegram.org/botYOUR_BOT_TOKEN/getUpdates`
-
-
+You can get your chat ID by sending a message to the bot and going to this URL to view the chat_id: `https://api.telegram.org/botYOUR_BOT_TOKEN/getUpdates`

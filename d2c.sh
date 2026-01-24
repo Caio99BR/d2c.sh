@@ -6,14 +6,14 @@ cloudflare_base="https://api.cloudflare.com/client/v4"
 # print usage text and exit
 print_usage() {
     echo '
-    d2c (Dynamic DNS Cloudflare): Update Cloudflare DNS 'A' and 'AAAA' records for your dynamic IP.
+    d2c (Dynamic DNS Cloudflare): Dynamic IPv4/6 records for Cloudflare.
 
     Usage: d2c.sh
 
     `d2c` UPDATES existing records. Please, create them in Cloudflare Dashboard before running this script.
 
-    The configuration is done in `/etc/d2c/*.toml` files in TOML format.
-    Configuration file structure:
+    By default, configuration files are read from `/etc/d2c/` directory. Use `--config <dir>` or `-c <dir>` to override.
+    E.g., `d2c.sh --config /path/to/config/`.
 
     ```
     [api]
@@ -42,6 +42,14 @@ if [ "$1" = "help" ] || [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
     exit
 fi
 
+# override config dir if provided
+if [ "$1" = "--config" ] || [ "$1" = "-c" ]; then
+    config_file_dir="$2"
+    if [ -z "$config_file_dir" ]; then
+        config_file_dir="/etc/d2c/"
+    fi
+fi
+
 # ensure yq is installed
 if ! command -v yq > /dev/null 2>&1; then
     echo "Error: 'yq' required and not found."
@@ -58,17 +66,14 @@ fi
 
 # create config dir if not exists
 if [ ! -d $config_file_dir ]; then
-    echo "Directory: ${config_file_dir} does not exist."
-    echo "Creating..."
     sudo mkdir $config_file_dir
-    
     echo "Created ${config_file_dir}. Please, fill the configuration files."
     exit 0
 fi
 
 # get my public IP
 public_ipv4=$(curl --silent https://checkip.amazonaws.com/)
-public_ipv6=$(curl --silent https://api64.ipify.org/)
+public_ipv6=$(curl --silent https://api6.ipify.org/)
 
 # process each config file in sorted order
 for config_file in $(ls ${config_file_dir}*.toml 2>/dev/null | sort -V); do
@@ -120,6 +125,12 @@ for config_file in $(ls ${config_file_dir}*.toml 2>/dev/null | sort -V); do
             else
                 c_type="A"
                 public_ip=$public_ipv4
+            fi
+
+            # print warning if AAAA record is configured but no ipv6 is available
+            if [ -z "$public_ipv6" ] && [ "$c_type" = "AAAA" ]; then
+                echo "[d2c.sh] WARNING! AAAA records are configured, but no IPv6 address is available. Skipping."
+                continue
             fi
 
             if [ "$name" = "$c_name" ] && [ "$type" = "$c_type" ]; then
