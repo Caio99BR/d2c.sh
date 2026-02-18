@@ -3,7 +3,6 @@
 config_file_dir="/etc/d2c_dravee/"
 cloudflare_base="https://api.cloudflare.com/client/v4"
 
-# print usage text and exit
 print_usage() {
     echo '
     d2c (Dynamic DNS Cloudflare): Dynamic IPv4/6 records for Cloudflare.
@@ -15,101 +14,79 @@ print_usage() {
     By default, configuration files are read from `/etc/d2c_dravee/` directory. Use `--config <dir>` or `-c <dir>` to override.
     E.g., `d2c.sh --config /path/to/config/`.
 
-    ```
-    [api]
-    zone-id = "<zone id>"
-    api-key = "<api key>"
+    Example config (JSON now):
 
-    [[dns]]
-    name = "test.example.com"
-    proxy = false
-
-    [[dns]]
-    name = "test2.example.com"
-    proxy = true
-
-    [[dns]]
-    name = "test-ipv6.example.com"
-    proxy = false
-    ipv6 = true # Optional, for 'AAAA' records
-    ```
+    {
+      "api": {
+        "zone-id": "<zone id>",
+        "api-key": "<api key>"
+      },
+      "dns": [
+        {"name": "test.example.com", "proxy": false},
+        {"name": "test2.example.com", "proxy": true},
+        {"name": "test-ipv6.example.com", "proxy": false, "ipv6": true}
+      ]
+    }
 '
 }
 
 # print usage if requested
-if [ "$1" = "help" ] || [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
+if [[ "$1" =~ ^(-h|--help|help)$ ]]; then
     print_usage
-    exit
-fi
-
-# override config dir if provided
-if [ "$1" = "--config" ] || [ "$1" = "-c" ]; then
-    config_file_dir="$2"
-    if [ -z "$config_file_dir" ]; then
-        config_file_dir="/etc/d2c/"
-    fi
-fi
-
-# ensure yq is installed
-if ! command -v yq > /dev/null 2>&1; then
-    echo "Error: 'yq' required and not found."
-    echo "Please install: https://github.com/mikefarah/yq."
-    exit 1
-fi
-
-# ensure curl is installed
-if ! command -v curl > /dev/null 2>&1; then
-    echo "Error: 'curl' required and not found."
-    echo "Please install: https://curl.se/download.html or through your package manager."
-    exit 1
-fi
-
-# create config dir if not exists
-if [ ! -d "$config_file_dir" ]; then
-    sudo mkdir "$config_file_dir"
-    echo "Created ${config_file_dir}. Please, fill the configuration files."
     exit 0
 fi
 
-# get my public IP
-public_ipv4=$(curl --silent https://checkip.amazonaws.com/)
-public_ipv6=$(curl --silent https://api6.ipify.org/)
+# override config dir
+if [[ "$1" =~ ^(-c|--config)$ ]]; then
+    config_file_dir="$2"
+    [[ -z "$config_file_dir" ]] && config_file_dir="/etc/d2c_dravee/"
+fi
 
-# process each config file in sorted order
-for config_file in $(ls "${config_file_dir}"*.toml 2>/dev/null | sort -V); do
-    echo "[d2c.sh] Processing ${config_file}..."
+# check dependencies
+for cmd in curl jq; do
+    if ! command -v $cmd >/dev/null 2>&1; then
+        echo "Error: '$cmd' is required." >&2
+        exit 1
+    fi
+done
 
-    # read zone-id and api-key from config file
-    zone_id=$(yq '.api.zone-id' "${config_file}")
-    api_key=$(yq '.api.api-key' "${config_file}")
+# create config dir if not exists
+[[ ! -d "$config_file_dir" ]] && { sudo mkdir -p "$config_file_dir"; echo "Created ${config_file_dir}. Please fill config files."; exit 0; }
 
-    # get records from Cloudflare
-    existing_records_raw=$(curl --silent --request GET \
-        --url ${cloudflare_base}/zones/"${zone_id}"/dns_records \
-        --header 'Content-Type: application/json' \
-        --header "Authorization: Bearer ${api_key}" \
-        | yq -oj -I=0 '.result[] | select(.type == "A" or .type == "AAAA") | [.id, .name, .ttl, .content, .type]'
-    )
+# get public IPs
+public_ipv4=$(curl -s https://checkip.amazonaws.com/)
+public_ipv6=$(curl -s https://api6.ipify.org/)
 
-    # get records defined in config file
-    readarray config_records < <(yq -oj -I=0 '.dns[]' "${config_file}")
+# process config files
+for config_file in $(ls "${config_file_dir}"*.json 2>/dev/null | sort -V); do
+    echo "[d2c.sh] Processing $config_file..."
+
+    zone_id=$(jq -r '.api["zone-id"]' "$config_file")
+    api_key=$(jq -r '.api["api-key"]' "$config_file")
+
+    # get Cloudflare records
+    existing_records=$(curl -s -X GET "$cloudflare_base/zones/$zone_id/dns_records" \
+        -H "Authorization: Bearer $api_key" \
+        -H "Content-Type: application/json" \
+        | jq -c '.result[] | select(.type=="A" or .type=="AAAA")')
+
+    # read config DNS records
+    config_records=$(jq -c '.dns[]' "$config_file")
 
     # iterate Cloudflare records
-    # for each record, check if it exists in config file
-    # if it does, update the record
-    for record in "${existing_records_raw[@]}"; do
-        id=$(yq '.[0]' <<< "${record}")
-        name=$(yq '.[1]' <<< "${record}")
-        ttl=$(yq '.[2]' <<< "${record}")
-        content=$(yq '.[3]' <<< "${record}")
-        type=$(yq '.[4]' <<< "${record}")
+    while read -r record; do
+        r_id=$(jq -r '.id' <<<"$record")
+        r_name=$(jq -r '.name' <<<"$record")
+        r_type=$(jq -r '.type' <<<"$record")
+        r_content=$(jq -r '.content' <<<"$record")
+        r_ttl=$(jq -r '.ttl' <<<"$record")
 
-        for c_record in "${config_records[@]}"; do
-            c_name=$(yq '.name' <<< "${c_record}")
-            c_proxy=$(yq '.proxy' <<< "${c_record}")
-            c_ipv6=$(yq '.ipv6' <<< "${c_record}")
+        while read -r c_record; do
+            c_name=$(jq -r '.name' <<<"$c_record")
+            c_proxy=$(jq -r '.proxy' <<<"$c_record")
+            c_ipv6=$(jq -r '.ipv6 // false' <<<"$c_record")
 
-            if [ "$c_ipv6" = true ]; then
+            if $c_ipv6; then
                 c_type="AAAA"
                 public_ip=$public_ipv6
             else
@@ -117,35 +94,22 @@ for config_file in $(ls "${config_file_dir}"*.toml 2>/dev/null | sort -V); do
                 public_ip=$public_ipv4
             fi
 
-            # print warning if AAAA record is configured but no ipv6 is available
-            if [ -z "$public_ipv6" ] && [ "$c_type" = "AAAA" ]; then
-                echo "[d2c.sh] WARNING! AAAA records are configured, but no IPv6 address is available. Skipping."
-                continue
-            fi
+            [[ -z "$public_ipv6" && "$c_type" == "AAAA" ]] && { echo "[d2c.sh] WARNING: No IPv6 for $c_name"; continue; }
 
-            if [ "$name" = "$c_name" ] && [ "$type" = "$c_type" ]; then
-                if [ "$public_ip" != "$content" ]; then
-                    # update DNS
-                    curl --silent --request PATCH \
-                    --url "${cloudflare_base}/zones/${zone_id}/dns_records/${id}" \
-                    --header 'Content-Type: application/json' \
-                    --header "Authorization: Bearer ${api_key}" \
-                    --data '{
-                        "content": "'"${public_ip}"'",
-                        "name": "'"${name}"'",
-                        "proxied": '"${c_proxy}"',
-                        "type": "'${c_type}'",
-                        "comment": "Managed by d2c.sh",
-                        "ttl": '"${ttl}"'
-                    }' > /dev/null
-
-                    echo "[d2c.sh] OK: ${name}"
+            if [[ "$r_name" == "$c_name" && "$r_type" == "$c_type" ]]; then
+                if [[ "$r_content" != "$public_ip" ]]; then
+                    curl -s -X PATCH "$cloudflare_base/zones/$zone_id/dns_records/$r_id" \
+                        -H "Authorization: Bearer $api_key" \
+                        -H "Content-Type: application/json" \
+                        --data "{\"content\":\"$public_ip\",\"name\":\"$c_name\",\"proxied\":$c_proxy,\"type\":\"$c_type\",\"comment\":\"Managed by d2c.sh\",\"ttl\":$r_ttl}" \
+                        >/dev/null
+                    echo "[d2c.sh] Updated: $c_name -> $public_ip"
                 else
-                    echo "[d2c.sh] ${name} did not change"
+                    echo "[d2c.sh] No change: $c_name"
                 fi
             fi
-        done
-    done
+        done <<<"$config_records"
+    done <<<"$existing_records"
 done
 
 echo "All files processed."
